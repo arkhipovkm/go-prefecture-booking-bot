@@ -249,6 +249,7 @@ func parseHTML(body []byte) (string, error) {
 	f(doc)
 
 	return str, err
+
 }
 
 func contains(s []int64, e int64) bool {
