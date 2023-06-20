@@ -105,6 +105,9 @@ func init() {
 		log.Printf("PROXY: not set")
 	}
 
+	t := time.Now()
+	LAST_SCHEDULE_CHECK = &t
+
 	// check if subscribers file exists
 	if _, err := os.Stat("subscriber_ids.txt"); os.IsNotExist(err) {
 		_, err := os.Create("subscriber_ids.txt")
