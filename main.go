@@ -156,10 +156,7 @@ func initializeSession(uri string) (*http.Client, error) {
 	log.Println("Initializing session...")
 
 	var err error
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		log.Fatalf("Got error while creating cookie jar %s", err.Error())
-	}
+	jar, _ := cookiejar.New(nil)
 
 	var tr *http.Transport
 	if PROXY != "" {
@@ -408,6 +405,17 @@ func initializeTelegramBot() error {
 	return err
 }
 
+func logToOwner(text string) {
+	msg := tgbotapi.NewMessage(
+		TELEGRAM_BOT_OWNER_CHAT_ID,
+		text,
+	)
+	_, err := BOT.Send(msg)
+	if err != nil {
+		log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
+	}
+}
+
 func main() {
 
 	err := initializeTelegramBot()
@@ -430,26 +438,12 @@ func main() {
 			}
 			body, err := doHTTPPostRequest(ENDPOINT, form, client)
 			if err != nil {
-				msg := tgbotapi.NewMessage(
-					TELEGRAM_BOT_OWNER_CHAT_ID,
-					"Got error while doing HTTP POST request: "+err.Error()+". Exiting...",
-				)
-				_, err = BOT.Send(msg)
-				if err != nil {
-					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
-				}
+				logToOwner(fmt.Sprintf("Got error while doing HTTP POST request: %s. Exiting..", err.Error()))
 				log.Fatal(err)
 			}
 			str, err := parseHTML(body)
 			if err != nil {
-				msg := tgbotapi.NewMessage(
-					TELEGRAM_BOT_OWNER_CHAT_ID,
-					"Got error while parsing HTML: "+err.Error()+". Exiting...",
-				)
-				_, err = BOT.Send(msg)
-				if err != nil {
-					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
-				}
+				logToOwner(fmt.Sprintf("Got error while parsing HTML: %s. Exiting..", err.Error()))
 				log.Fatal(err)
 			}
 			log.Printf("Planning ID: %s, Result: %s\n", planningID, str)
@@ -484,14 +478,7 @@ func main() {
 		if time.Since(t0) > 10*time.Minute {
 			client, err = initializeSession(ENDPOINT)
 			if err != nil {
-				msg := tgbotapi.NewMessage(
-					TELEGRAM_BOT_OWNER_CHAT_ID,
-					"Got error while re-initializing session: "+err.Error()+". Exiting...",
-				)
-				_, err = BOT.Send(msg)
-				if err != nil {
-					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
-				}
+				logToOwner(fmt.Sprintf("Got error while re-initializing session: %s. Exiting..", err.Error())
 				log.Fatal(err)
 			}
 			t0 = time.Now()
