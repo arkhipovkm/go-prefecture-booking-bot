@@ -478,7 +478,7 @@ func main() {
 		if time.Since(t0) > 10*time.Minute {
 			client, err = initializeSession(ENDPOINT)
 			if err != nil {
-				logToOwner(fmt.Sprintf("Got error while re-initializing session: %s. Exiting..", err.Error())
+				logToOwner(fmt.Sprintf("Got error while re-initializing session: %s. Exiting..", err.Error()))
 				log.Fatal(err)
 			}
 			t0 = time.Now()
