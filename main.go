@@ -26,6 +26,7 @@ var (
 	BOT                            *tgbotapi.BotAPI
 	LAST_SCHEDULE_CHECK            *time.Time
 	ENDPOINT                       string
+	PROXY                          string
 	PLANNING_ID_TO_COMMON_NAME_MAP = map[string]string{
 		"41132": "Guichet 7",
 		"41134": "Guichet 9",
@@ -88,6 +89,13 @@ func init() {
 	}
 	log.Printf("ENDPOINT: %s", ENDPOINT)
 
+	PROXY = os.Getenv("PROXY")
+	if PROXY != "" {
+		log.Printf("PROXY: %s", PROXY)
+	} else {
+		log.Printf("PROXY: not set")
+	}
+
 	// check if subscribers file exists
 	if _, err := os.Stat("subscriber_ids.txt"); os.IsNotExist(err) {
 		_, err := os.Create("subscriber_ids.txt")
@@ -144,8 +152,16 @@ func initializeSession(uri string) (*http.Client, error) {
 		log.Fatalf("Got error while creating cookie jar %s", err.Error())
 	}
 
+	var tr *http.Transport
+	if PROXY != "" {
+		log.Printf("Using proxy %s", PROXY)
+		tr = &http.Transport{
+			Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: PROXY}),
+		}
+	}
 	client := &http.Client{
-		Jar: jar,
+		Jar:       jar,
+		Transport: tr,
 	}
 
 	req, err := http.NewRequest("GET", uri, nil)
@@ -168,7 +184,6 @@ func initializeSession(uri string) (*http.Client, error) {
 	if err != nil {
 		return client, err
 	}
-	log.Println(string(body))
 
 	var sessionID string
 	for _, cookie := range client.Jar.Cookies(req.URL) {
@@ -180,6 +195,7 @@ func initializeSession(uri string) (*http.Client, error) {
 
 	if sessionID == "" {
 		err = errors.New("no session ID found")
+		log.Println(string(body))
 		return client, err
 	}
 
@@ -317,7 +333,7 @@ func processTelegramUpdates(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChanne
 		case "start":
 			msg := tgbotapi.NewMessage(
 				update.Message.Chat.ID,
-				"Welcome to the Hérault Prefecture appointment notifier bot. You can subscribe to the notifications using the /subscribe command and unsubscribe using the /unsubscribe command.",
+				"Welcome to the Prefecture appointment notifier bot. You can subscribe to the notifications using the /subscribe command and unsubscribe using the /unsubscribe command.",
 			)
 			_, err = BOT.Send(msg)
 			if err != nil {
