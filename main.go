@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 
 var (
 	TELEGRAM_BOT_API_TOKEN         string
+	TELEGRAM_BOT_OWNER_CHAT_ID     int64
 	BOT                            *tgbotapi.BotAPI
 	LAST_SCHEDULE_CHECK            *time.Time
 	ENDPOINT                       string
@@ -82,6 +82,15 @@ func init() {
 		panic("No TELEGRAM_BOT_API_TOKEN in the environment")
 	}
 	log.Printf("TELEGRAM_BOT_API_TOKEN: %s", TELEGRAM_BOT_API_TOKEN)
+
+	TELEGRAM_BOT_OWNER_CHAT_ID, err := strconv.ParseInt(os.Getenv("TELEGRAM_BOT_OWNER_CHAT_ID"), 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	if TELEGRAM_BOT_OWNER_CHAT_ID == 0 {
+		panic("No TELEGRAM_BOT_OWNER_CHAT_ID in the environment")
+	}
+	log.Printf("TELEGRAM_BOT_OWNER_CHAT_ID: %d", TELEGRAM_BOT_OWNER_CHAT_ID)
 
 	ENDPOINT = os.Getenv("ENDPOINT")
 	if ENDPOINT == "" {
@@ -203,14 +212,14 @@ func initializeSession(uri string) (*http.Client, error) {
 
 }
 
-func htmlNodeToString(n *html.Node) string {
-	var str string
-	var buf bytes.Buffer
-	w := io.Writer(&buf)
-	html.Render(w, n)
-	str = buf.String()
-	return str
-}
+// func htmlNodeToString(n *html.Node) string {
+// 	var str string
+// 	var buf bytes.Buffer
+// 	w := io.Writer(&buf)
+// 	html.Render(w, n)
+// 	str = buf.String()
+// 	return str
+// }
 
 func htmlNodeGetChildrenTExt(n *html.Node) string {
 	var str string
@@ -421,10 +430,26 @@ func main() {
 			}
 			body, err := doHTTPPostRequest(ENDPOINT, form, client)
 			if err != nil {
+				msg := tgbotapi.NewMessage(
+					TELEGRAM_BOT_OWNER_CHAT_ID,
+					"Got error while doing HTTP POST request: "+err.Error()+". Exiting...",
+				)
+				_, err = BOT.Send(msg)
+				if err != nil {
+					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
+				}
 				log.Fatal(err)
 			}
 			str, err := parseHTML(body)
 			if err != nil {
+				msg := tgbotapi.NewMessage(
+					TELEGRAM_BOT_OWNER_CHAT_ID,
+					"Got error while parsing HTML: "+err.Error()+". Exiting...",
+				)
+				_, err = BOT.Send(msg)
+				if err != nil {
+					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
+				}
 				log.Fatal(err)
 			}
 			log.Printf("Planning ID: %s, Result: %s\n", planningID, str)
@@ -437,6 +462,7 @@ func main() {
 			}
 
 			if !strings.Contains(str, "Il n'existe plus de plage horaire libre") {
+				log.Printf("An appointment is available for %s: %s", PLANNING_ID_TO_COMMON_NAME_MAP[planningID], str)
 				subscriberIDs, err := loadSubscrierIDs()
 				if err != nil {
 					log.Printf("Got error while loading subscriber IDs %s", err.Error())
@@ -452,13 +478,20 @@ func main() {
 					}
 				}
 			}
-
 			time.Sleep(30 * time.Second)
 		}
 
-		if time.Since(t0) > 30*time.Minute {
+		if time.Since(t0) > 10*time.Minute {
 			client, err = initializeSession(ENDPOINT)
 			if err != nil {
+				msg := tgbotapi.NewMessage(
+					TELEGRAM_BOT_OWNER_CHAT_ID,
+					"Got error while re-initializing session: "+err.Error()+". Exiting...",
+				)
+				_, err = BOT.Send(msg)
+				if err != nil {
+					log.Printf("Got error while sending message to subscriber %d %s", TELEGRAM_BOT_OWNER_CHAT_ID, err.Error())
+				}
 				log.Fatal(err)
 			}
 			t0 = time.Now()
