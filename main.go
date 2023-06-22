@@ -220,7 +220,7 @@ func htmlNodeToString(n *html.Node) string {
 	w := io.Writer(&buf)
 	html.Render(w, n)
 	str = buf.String()
-	return strings.TrimSpace(str)
+	return html.UnescapeString(strings.TrimSpace(str))
 }
 
 func htmlNodeGetChildrenText(n *html.Node) string {
@@ -230,7 +230,7 @@ func htmlNodeGetChildrenText(n *html.Node) string {
 			str += c.Data
 		}
 	}
-	return strings.TrimSpace(str)
+	return html.UnescapeString(strings.TrimSpace(str))
 }
 
 func parseHTML(body []byte) (string, error) {
