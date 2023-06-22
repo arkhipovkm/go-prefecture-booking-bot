@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -77,13 +78,14 @@ func saveSubscrierIDs(subscriberIDs []int64) error {
 }
 
 func init() {
+	var err error
 	TELEGRAM_BOT_API_TOKEN = os.Getenv("TELEGRAM_BOT_API_TOKEN")
 	if TELEGRAM_BOT_API_TOKEN == "" {
 		panic("No TELEGRAM_BOT_API_TOKEN in the environment")
 	}
 	log.Printf("TELEGRAM_BOT_API_TOKEN: %s", TELEGRAM_BOT_API_TOKEN)
 
-	TELEGRAM_BOT_OWNER_CHAT_ID, err := strconv.ParseInt(os.Getenv("TELEGRAM_BOT_OWNER_CHAT_ID"), 10, 64)
+	TELEGRAM_BOT_OWNER_CHAT_ID, err = strconv.ParseInt(os.Getenv("TELEGRAM_BOT_OWNER_CHAT_ID"), 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -212,16 +214,16 @@ func initializeSession(uri string) (*http.Client, error) {
 
 }
 
-// func htmlNodeToString(n *html.Node) string {
-// 	var str string
-// 	var buf bytes.Buffer
-// 	w := io.Writer(&buf)
-// 	html.Render(w, n)
-// 	str = buf.String()
-// 	return str
-// }
+func htmlNodeToString(n *html.Node) string {
+	var str string
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	html.Render(w, n)
+	str = buf.String()
+	return strings.TrimSpace(str)
+}
 
-func htmlNodeGetChildrenTExt(n *html.Node) string {
+func htmlNodeGetChildrenText(n *html.Node) string {
 	var str string
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.TextNode {
@@ -240,7 +242,7 @@ func parseHTML(body []byte) (string, error) {
 		if n.Type == html.ElementNode && n.Data == "form" {
 			for _, a := range n.Attr {
 				if a.Key == "name" && a.Val == "create" {
-					str = htmlNodeGetChildrenTExt(n)
+					str = htmlNodeToString(n)
 					break
 				}
 			}
@@ -455,6 +457,7 @@ func main() {
 
 			if str == "" {
 				log.Printf("Got empty result for planning ID %s", planningID)
+				logToOwner(fmt.Sprintf("Got empty result for planning ID %s", planningID))
 				continue
 			}
 
