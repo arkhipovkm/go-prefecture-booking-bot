@@ -22,16 +22,18 @@ import (
 )
 
 var (
-	TELEGRAM_BOT_API_TOKEN         string
-	TELEGRAM_BOT_OWNER_CHAT_ID     int64
-	BOT                            *tgbotapi.BotAPI
-	LAST_SCHEDULE_CHECK            *time.Time
-	ENDPOINT                       string
-	PROXY                          string
-	PLANNING_ID_TO_COMMON_NAME_MAP = map[string]string{
-		"41132": "Guichet 7",
-		"41134": "Guichet 9",
-	}
+	TELEGRAM_BOT_API_TOKEN     string
+	TELEGRAM_BOT_OWNER_CHAT_ID int64
+	BOT                        *tgbotapi.BotAPI
+	LAST_SCHEDULE_CHECK        *time.Time
+	ENDPOINT                   string
+	PROXY_HOST                 string
+	PROXY_USERNAME             string
+	PROXY_PASSWORD             string
+	// PLANNING_ID_TO_COMMON_NAME_MAP = map[string]string{
+	// 	"41132": "Guichet 7",
+	// 	//"41134": "Guichet 9",
+	// }
 )
 
 func loadSubscrierIDs() ([]int64, error) {
@@ -100,11 +102,25 @@ func init() {
 	}
 	log.Printf("ENDPOINT: %s", ENDPOINT)
 
-	PROXY = os.Getenv("PROXY")
-	if PROXY != "" {
-		log.Printf("PROXY: %s", PROXY)
+	PROXY_HOST = os.Getenv("PROXY_HOST")
+	if PROXY_HOST != "" {
+		log.Printf("PROXY_HOST: %s", PROXY_HOST)
 	} else {
-		log.Printf("PROXY: not set")
+		log.Printf("PROXY_HOST: not set")
+	}
+
+	PROXY_USERNAME = os.Getenv("PROXY_USERNAME")
+	if PROXY_USERNAME != "" {
+		log.Printf("PROXY_USERNAME: %s", PROXY_USERNAME)
+	} else {
+		log.Printf("PROXY_USERNAME: not set")
+	}
+
+	PROXY_PASSWORD = os.Getenv("PROXY_PASSWORD")
+	if PROXY_PASSWORD != "" {
+		log.Printf("PROXY_PASSWORD: %s", PROXY_PASSWORD)
+	} else {
+		log.Printf("PROXY_PASSWORD: not set")
 	}
 
 	t := time.Now()
@@ -148,7 +164,7 @@ func doHTTPPostRequest(uri string, form url.Values, client *http.Client) ([]byte
 
 	defer resp.Body.Close()
 
-	body, err = ioutil.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return body, err
 	}
@@ -164,15 +180,23 @@ func initializeSession(uri string) (*http.Client, error) {
 	jar, _ := cookiejar.New(nil)
 
 	var tr *http.Transport
-	if PROXY != "" {
-		log.Printf("Using proxy %s", PROXY)
+	if PROXY_HOST != "" {
+		log.Printf("Using proxy %s", PROXY_HOST)
 		tr = &http.Transport{
-			Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: PROXY}),
+			Proxy: http.ProxyURL(&url.URL{
+				Scheme: "http",
+				Host:   PROXY_HOST,
+				User: url.UserPassword(
+					PROXY_USERNAME,
+					PROXY_PASSWORD,
+				),
+			}),
 		}
 	}
 	client := &http.Client{
 		Jar:       jar,
 		Transport: tr,
+		Timeout:   5 * time.Second,
 	}
 
 	req, err := http.NewRequest("GET", uri, nil)
@@ -209,6 +233,8 @@ func initializeSession(uri string) (*http.Client, error) {
 		log.Println(string(body))
 		return client, err
 	}
+	// set timeout to a greater value for actual post requests
+	client.Timeout = 30 * time.Second
 
 	return client, err
 
@@ -233,7 +259,37 @@ func htmlNodeGetChildrenText(n *html.Node) string {
 	return html.UnescapeString(strings.TrimSpace(str))
 }
 
-func parseHTML(body []byte) (string, error) {
+func parseHTMLFindErrorList(body []byte) (string, error) {
+	var err error
+	var str string
+	// Recursively parse the HTML tree
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "ul" {
+			for _, a := range n.Attr {
+				if a.Key == "class" && a.Val == "error" {
+					str = htmlNodeToString(n)
+					break
+				}
+			}
+		}
+		// Recursion
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	// First call of recursive function
+	doc, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return str, err
+	}
+	f(doc)
+
+	return str, err
+
+}
+
+func parseHTMLFindForm(body []byte) (string, error) {
 	var err error
 	var str string
 	// Recursively parse the HTML tree
@@ -428,58 +484,76 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client, err := initializeSession(ENDPOINT)
-	if err != nil {
-		log.Fatal(err)
+	var client *http.Client
+	var nbInits int
+	for {
+		client, err = initializeSession(ENDPOINT)
+		if err != nil {
+			nbInits++
+			log.Printf("Error initializing session: %s. Tentative %d", err, nbInits)
+			continue
+		}
+		break
 	}
 
 	t0 := time.Now()
 
 	for {
-		for planningID := range PLANNING_ID_TO_COMMON_NAME_MAP {
-			form := url.Values{
-				"planning":   {planningID},
-				"nextButton": {"Etape+suivante"},
-			}
-			body, err := doHTTPPostRequest(ENDPOINT, form, client)
-			if err != nil {
-				logToOwner(fmt.Sprintf("Got error while doing HTTP POST request: %s. Exiting..", err.Error()))
-				log.Fatal(err)
-			}
-			str, err := parseHTML(body)
-			if err != nil {
-				logToOwner(fmt.Sprintf("Got error while parsing HTML: %s. Exiting..", err.Error()))
-				log.Fatal(err)
-			}
-			log.Printf("Planning ID: %s, Result: %s\n", planningID, str)
-			t := time.Now()
-			LAST_SCHEDULE_CHECK = &t
-
-			if str == "" {
-				log.Printf("Got empty result for planning ID %s", planningID)
-				logToOwner(fmt.Sprintf("Got empty result for planning ID %s", planningID))
-				continue
-			}
-
-			if !strings.Contains(str, "Il n'existe plus de plage horaire libre") {
-				log.Printf("An appointment is available for %s: %s", PLANNING_ID_TO_COMMON_NAME_MAP[planningID], str)
-				subscriberIDs, err := loadSubscrierIDs()
-				if err != nil {
-					log.Printf("Got error while loading subscriber IDs %s", err.Error())
-				}
-				for _, subscriberID := range subscriberIDs {
-					msg := tgbotapi.NewMessage(
-						subscriberID,
-						"An appointment is available for "+PLANNING_ID_TO_COMMON_NAME_MAP[planningID],
-					)
-					_, err = BOT.Send(msg)
-					if err != nil {
-						log.Printf("Got error while sending message to subscriber %d %s", subscriberID, err.Error())
-					}
-				}
-			}
-			time.Sleep(30 * time.Second)
+		form := url.Values{
+			// "planning":   {planningID},
+			"condition":  {"on"},
+			"nextButton": {"Effectuer+une+demande+de+rendez-vous"},
 		}
+		body, err := doHTTPPostRequest(ENDPOINT, form, client)
+		if err != nil {
+			// logToOwner(fmt.Sprintf("Got error while doing HTTP POST request: %s. Exiting..", err.Error()))
+			log.Fatal(err)
+		}
+		str, err := parseHTMLFindErrorList(body)
+		if err != nil {
+			logToOwner(fmt.Sprintf("Got error while parsing HTML for error list: %s. Exiting..", err.Error()))
+			log.Fatal(err)
+		}
+		log.Printf("Error list result: %s\n", str)
+
+		if str == "" {
+			str, err = parseHTMLFindForm(body)
+			if err != nil {
+				logToOwner(fmt.Sprintf("Got error while parsing HTML for create form: %s. Exiting..", err.Error()))
+				log.Fatal(err)
+			}
+			log.Printf("Form result: %s\n", str)
+		}
+
+		t := time.Now()
+		LAST_SCHEDULE_CHECK = &t
+
+		if str == "" {
+			log.Printf("Got empty result")
+			logToOwner("Got empty result")
+			time.Sleep(15 * time.Second)
+			continue
+		}
+
+		if !strings.Contains(str, "Il n'y a pas calendrier disponible pour effectuer une demande de rendez-vous") &&
+			!strings.Contains(str, "Il n'existe plus de plage horaire libre") {
+			log.Printf("An appointment might be available: %s", str)
+			subscriberIDs, err := loadSubscrierIDs()
+			if err != nil {
+				log.Printf("Got error while loading subscriber IDs %s", err.Error())
+			}
+			for _, subscriberID := range subscriberIDs {
+				msg := tgbotapi.NewMessage(
+					subscriberID,
+					"An appointment might be available!",
+				)
+				_, err = BOT.Send(msg)
+				if err != nil {
+					log.Printf("Got error while sending message to subscriber %d %s", subscriberID, err.Error())
+				}
+			}
+		}
+		time.Sleep(15 * time.Second)
 
 		if time.Since(t0) > 10*time.Minute {
 			client, err = initializeSession(ENDPOINT)
