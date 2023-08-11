@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -77,6 +78,10 @@ func saveSubscrierIDs(subscriberIDs []int64) error {
 	}
 
 	return err
+}
+
+func saveFile(filename string, body []byte) error {
+	return os.WriteFile(filename, body, os.ModePerm)
 }
 
 func init() {
@@ -246,7 +251,7 @@ func htmlNodeToString(n *html.Node) string {
 	w := io.Writer(&buf)
 	html.Render(w, n)
 	str = buf.String()
-	return html.UnescapeString(strings.TrimSpace(str))
+	return strings.ReplaceAll(html.UnescapeString(strings.TrimSpace(str)), "\n", " <LF> ")
 }
 
 func htmlNodeGetChildrenText(n *html.Node) string {
@@ -538,6 +543,14 @@ func main() {
 		if !strings.Contains(str, "Il n'y a pas calendrier disponible pour effectuer une demande de rendez-vous") &&
 			!strings.Contains(str, "Il n'existe plus de plage horaire libre") {
 			log.Printf("An appointment might be available: %s", str)
+
+			saveFile(
+				filepath.Join("results",
+					fmt.Sprintf("result-appointment-might-be-available-%d.html", time.Now().UnixMilli()),
+				),
+				body,
+			)
+
 			subscriberIDs, err := loadSubscrierIDs()
 			if err != nil {
 				log.Printf("Got error while loading subscriber IDs %s", err.Error())
@@ -553,15 +566,11 @@ func main() {
 				}
 			}
 		}
+		log.Println("Appointment not available..")
 		time.Sleep(15 * time.Second)
 
 		if time.Since(t0) > 10*time.Minute {
-			client, err = initializeSession(ENDPOINT)
-			if err != nil {
-				logToOwner(fmt.Sprintf("Got error while re-initializing session: %s. Exiting..", err.Error()))
-				log.Fatal(err)
-			}
-			t0 = time.Now()
+			os.Exit(0)
 		}
 	}
 }
